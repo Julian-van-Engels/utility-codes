@@ -90,10 +90,10 @@ def generate_report(config):
             # Topic section
             f.write(f"## {topic}\n\n")
             first_date = valid_commits[0]['date'] if valid_commits else ''
-            f.write(f"- [x] #task {note} ⏳ {first_date} ✅ {datetime.now().strftime('%Y-%m-%d')}\n")
+            f.write(f"- [x] #task {note} ⏳ {first_date} 🔺 ✅ {datetime.now().strftime('%Y-%m-%d')}\n")
             
             for commit in valid_commits:
-                f.write(f"    - [x] #task {commit['subject']} ⏳ {commit['date']} ✅ {commit['date']}\n")
+                f.write(f"    - [x] #task {commit['subject']} ⏳ {commit['date']} 🔺 ✅ {commit['date']}\n")
             
             f.write("\n")
         

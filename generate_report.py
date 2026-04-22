@@ -74,6 +74,8 @@ def generate_report(config):
             
             valid_commits = []
             for commit in commits:
+                if commit['subject'].endswith('.'):
+                    commit['subject'] = commit['subject'][:-1]
                 if is_trash_commit(commit['subject']):
                     trash_commits.append(commit)
                 else:
@@ -103,7 +105,7 @@ def generate_report(config):
             f.write("\n")
 
 if __name__ == '__main__':
-    config_path = '/Users/Julian/CodeSpace/GitOverView/basic-info.json'
+    config_path = '/Users/Julian/CodeSpace/utility-codes/config/basic-info.json'
     config = load_config(config_path)
     generate_report(config)
     print(f"Report generated at {os.path.join(config['report_generate_path'], config['title'] + '.md')}")

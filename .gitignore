@@ -1,0 +1,14 @@
+# config files, personal settings, and other non-code files
+config/*
+*.config
+*.json
+*.yaml
+*.yml
+*.env
+*.log
+
+# requests *.md files to be ignored, but not all markdown files
+requests/*
+
+# macOS
+*.DS_Store

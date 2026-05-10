@@ -230,7 +230,11 @@ def main(path_a, path_b):
     debug_compare_files(result, path_a, path_b)
 
 if __name__ == "__main__":
-    path_a = "L:\\"
-    # path_b = "E:\\硬盘备份260323"
-    path_b = "G:\\我的硬盘备份"
+    json_file = 'config/compare_2folder.json'
+    def import_path_from_json(json_file):
+        import json
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('path_a'), data.get('path_b')
+    path_a, path_b = import_path_from_json('config/compare_2folder.json')
     main(path_a, path_b)

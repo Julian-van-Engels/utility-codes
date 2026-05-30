@@ -36,14 +36,43 @@ setup_apt_mirror() {
     fi
     local codename
     codename=$(lsb_release -cs 2>/dev/null) || return
-    echo "==> 切换 apt 为清华镜像源..."
-    ${SUDO:-} cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
-    ${SUDO:-} tee /etc/apt/sources.list > /dev/null << EOF
-deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename} main restricted universe multiverse
-deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-updates main restricted universe multiverse
-deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-backports main restricted universe multiverse
-deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-security main restricted universe multiverse
+
+    local version_id
+    version_id=$(awk -F= '/VERSION_ID/ {gsub(/"/,""); print $2}' /etc/os-release 2>/dev/null)
+    local major_ver=${version_id%%.*}
+
+    local tsinghua="https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+    local security="http://security.ubuntu.com/ubuntu"
+
+    if [ "$major_ver" -ge 24 ] 2>/dev/null; then
+        echo "==> 切换 apt 为清华镜像源 (DEB822 格式)..."
+        ${SUDO:-} mkdir -p /etc/apt/sources.list.d
+        # 先备份可能存在的旧格式文件
+        ${SUDO:-} cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
+        ${SUDO:-} cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.bak 2>/dev/null || true
+        ${SUDO:-} tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null << EOF
+Types: deb
+URIs: ${tsinghua}
+Suites: ${codename} ${codename}-updates ${codename}-backports
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+Types: deb
+URIs: ${security}
+Suites: ${codename}-security
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 EOF
+    else
+        echo "==> 切换 apt 为清华镜像源..."
+        ${SUDO:-} cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
+        ${SUDO:-} tee /etc/apt/sources.list > /dev/null << EOF
+deb ${tsinghua}/ ${codename} main restricted universe multiverse
+deb ${tsinghua}/ ${codename}-updates main restricted universe multiverse
+deb ${tsinghua}/ ${codename}-backports main restricted universe multiverse
+deb ${security}/ ${codename}-security main restricted universe multiverse
+EOF
+    fi
     echo "==> apt 清华源配置完成"
 }
 
@@ -130,11 +159,11 @@ install_ohmyzsh() {
 
     local installed=false
     for repo in \
-        "https://mirror.ghproxy.com/https://github.com/ohmyzsh/ohmyzsh.git" \
         "https://gitee.com/mirrors/oh-my-zsh.git" \
-        "https://github.com/ohmyzsh/ohmyzsh.git"; do
+        "https://github.com/ohmyzsh/ohmyzsh.git" \
+        "https://mirror.ghproxy.com/https://github.com/ohmyzsh/ohmyzsh.git"; do
         echo "  尝试: $repo"
-        if git clone --depth=1 "$repo" "$HOME/.oh-my-zsh" 2>&1; then
+        if timeout 20 git clone --depth=1 "$repo" "$HOME/.oh-my-zsh" 2>&1; then
             installed=true
             break
         fi
@@ -173,17 +202,17 @@ install_plugins() {
 
     if [ ! -d "$custom_dir/zsh-autosuggestions" ]; then
         echo "==> 安装 zsh-autosuggestions..."
-        git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
-        git clone --depth=1 https://mirror.ghproxy.com/https://github.com/zsh-users/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
-        git clone --depth=1 https://gitee.com/mirrors/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
+        timeout 20 git clone --depth=1 https://gitee.com/mirrors/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
+        timeout 20 git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
+        timeout 20 git clone --depth=1 https://mirror.ghproxy.com/https://github.com/zsh-users/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
         echo "  zsh-autosuggestions 安装失败，跳过"
     fi
 
     if [ ! -d "$custom_dir/zsh-syntax-highlighting" ]; then
         echo "==> 安装 zsh-syntax-highlighting..."
-        git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
-        git clone --depth=1 https://mirror.ghproxy.com/https://github.com/zsh-users/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
-        git clone --depth=1 https://gitee.com/mirrors/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
+        timeout 20 git clone --depth=1 https://gitee.com/mirrors/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
+        timeout 20 git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
+        timeout 20 git clone --depth=1 https://mirror.ghproxy.com/https://github.com/zsh-users/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
         echo "  zsh-syntax-highlighting 安装失败，跳过"
     fi
 }
@@ -236,6 +265,10 @@ install_tools() {
                 if command -v apt &>/dev/null; then
                     sudo apt update -qq
                     sudo apt install -y ffmpeg 7zip jq poppler-utils fd-find ripgrep fzf zoxide imagemagick chafa 2>/dev/null || true
+                    # Ubuntu 上 fd-find 二进制名为 fdfind，创建 fd 软链接
+                    if command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
+                        sudo ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+                    fi
                 fi
                 # 下载并安装 yazi 本体
                 local yazi_arch
@@ -259,7 +292,7 @@ install_tools() {
             fi
 
             # --- trash-cli ---
-            if ! command -v trash &>/dev/null; then
+            if ! command -v trash-put &>/dev/null; then
                 echo "  -> 安装 trash-cli..."
                 if command -v apt &>/dev/null; then
                     sudo apt install -y trash-cli 2>/dev/null || true
@@ -306,7 +339,11 @@ source $ZSH/oh-my-zsh.sh
 
 # === 通用别名 ===
 alias zshconfig="vim ~/.zshrc"
-alias rm="trash"
+if command -v trash-put &>/dev/null; then
+    alias rm="trash-put"
+elif command -v trash &>/dev/null; then
+    alias rm="trash"
+fi
 alias ls='eza --icons --git --group-directories-first'
 alias ll='eza -lh --icons --git --group-directories-first'
 alias lt='eza --tree --level=2 --icons'

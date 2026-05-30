@@ -358,6 +358,38 @@ install_opencode() {
 # ============================================================
 write_zshrc() {
     echo "==> 写入 .zshrc..."
+
+    # 备份旧配置
+    if [ -f "$HOME/.zshrc" ]; then
+        local backup="${HOME}/.zshrc.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$HOME/.zshrc" "$backup"
+        echo "    已备份旧配置到: $backup"
+    fi
+    if [ -f "$HOME/.zshenv" ]; then
+        local backup_env="${HOME}/.zshenv.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$HOME/.zshenv" "$backup_env"
+        echo "    已备份旧 .zshenv 到: $backup_env"
+    fi
+    if [ -f "$HOME/.zprofile" ]; then
+        local backup_prof="${HOME}/.zprofile.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$HOME/.zprofile" "$backup_prof"
+        echo "    已备份旧 .zprofile 到: $backup_prof"
+    fi
+
+    # 迁移旧 .zshrc 中的自定义内容（非 Oh My Zsh 生成的部分）
+    local migrated_file=""
+    if [ -n "${backup:-}" ] && [ -f "$backup" ]; then
+        echo "    迁移旧配置中的自定义内容..."
+        # 提取 Oh My Zsh 区块之外的用户自定义配置
+        migrated_file="${backup}.migrated"
+        awk '
+            /^# (If you come from bash|Path to your|Set name of)/ { in_omz=1 }
+            /^# === Oh My Zsh ===/ { in_omz=1 }
+            /^source \$ZSH\/oh-my-zsh.sh/ { in_omz=0; next }
+            { if (!in_omz) print }
+        ' "$backup" > "$migrated_file" 2>/dev/null || true
+    fi
+
     cat > "$HOME/.zshrc" << 'ZSHRC_EOF'
 # === 终端类型（修复远程连接时输入回显异常） ===
 export TERM=xterm-256color
@@ -456,6 +488,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     }
 fi
 ZSHRC_EOF
+
+    # 追加迁移过来的旧自定义配置
+    if [ -n "${migrated_file:-}" ] && [ -f "$migrated_file" ] && [ -s "$migrated_file" ]; then
+        echo "" >> "$HOME/.zshrc"
+        echo "# === 以下为旧配置迁移内容 (${backup}) ===" >> "$HOME/.zshrc"
+        cat "$migrated_file" >> "$HOME/.zshrc"
+        rm -f "$migrated_file"
+    fi
 }
 
 # ============================================================

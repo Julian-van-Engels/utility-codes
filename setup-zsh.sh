@@ -360,9 +360,9 @@ write_zshrc() {
     echo "==> 写入 .zshrc..."
 
     # 遵循 Oh My Zsh 官方策略：备份旧 .zshrc 到 .zshrc.pre-oh-my-zsh
+    local pre="$HOME/.zshrc.pre-oh-my-zsh"
     if [ -f "$HOME/.zshrc" ] || [ -h "$HOME/.zshrc" ]; then
         echo "    发现已有 .zshrc，处理备份..."
-        local pre="$HOME/.zshrc.pre-oh-my-zsh"
         if [ -e "$pre" ]; then
             local old_pre="${pre}-$(date +%Y-%m-%d_%H-%M-%S)"
             echo "    .zshrc.pre-oh-my-zsh 已存在，重命名为 ${old_pre}"
@@ -370,6 +370,21 @@ write_zshrc() {
         fi
         echo "    备份旧 .zshrc 到 .zshrc.pre-oh-my-zsh"
         mv "$HOME/.zshrc" "$pre"
+    else
+        # 没有 .zshrc 但可能有 bash 配置，迁移到 .zshrc.pre-oh-my-zsh 作为参考
+        local bash_conf=""
+        for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+            if [ -f "$f" ]; then
+                bash_conf="$f"
+                break
+            fi
+        done
+        if [ -n "$bash_conf" ]; then
+            echo "    未找到 .zshrc，但发现 $bash_conf"
+            echo "    已将 $(basename "$bash_conf") 复制到 .zshrc.pre-oh-my-zsh 作为参考"
+            cp "$bash_conf" "$pre"
+            BASH_MIGRATED=true
+        fi
     fi
 
     cat > "$HOME/.zshrc" << 'ZSHRC_EOF'
@@ -493,6 +508,11 @@ echo "  全部完成！"
 echo "  执行: exec zsh"
 echo "  或重新打开终端即可生效"
 echo ""
+if [ "${BASH_MIGRATED:-}" = true ]; then
+    echo "  旧 bash 配置已保存在 ~/.zshrc.pre-oh-my-zsh"
+    echo "  请手动将需要的配置（如 PATH、alias 等）复制到 ~/.zshrc"
+    echo ""
+fi
 echo "  opencode 使用方法:"
 echo "    cd 你的项目 && opencode"
 echo "    进入后执行 /connect 连接自己的 AI 模型"

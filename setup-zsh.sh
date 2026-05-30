@@ -1,60 +1,287 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
 OS="$(uname -s)"
 
-# ============================================================
-# 1. 安装 Oh My Zsh
-# ============================================================
-echo "==> 安装 Oh My Zsh..."
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+# 开局请求 sudo 权限并缓存，后续不再询问
+SUDO=""
+if sudo -v 2>/dev/null; then
+    SUDO="sudo"
+    # 后台持续刷新 sudo 缓存，防止超时
+    (while true; do sudo -n true; sleep 60; kill -0 $$ || exit; done) 2>/dev/null &
 fi
 
 # ============================================================
-# 2. 安装自定义插件
+# 0. Linux: 配置代理（git + curl 国内加速）
 # ============================================================
-ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
-mkdir -p "$ZSH_CUSTOM"
-
-if [ ! -d "$ZSH_CUSTOM/zsh-autosuggestions" ]; then
-    git clone https://github.com/zsh-users/zsh-autosuggestions "$ZSH_CUSTOM/zsh-autosuggestions"
-fi
-if [ ! -d "$ZSH_CUSTOM/zsh-syntax-highlighting" ]; then
-    git clone https://github.com/zsh-users/zsh-syntax-highlighting "$ZSH_CUSTOM/zsh-syntax-highlighting"
-fi
+setup_proxy() {
+    local proxy_url="http://127.0.0.1:7897"
+    if [ "$OS" != "Linux" ]; then
+        return
+    fi
+    # 先检测代理是否可达
+    if curl -s --connect-timeout 3 --proxy "$proxy_url" https://www.google.com > /dev/null 2>&1; then
+        echo "==> 检测到代理 $proxy_url，配置 git 代理..."
+        git config --global http.proxy "$proxy_url"
+        git config --global https.proxy "$proxy_url"
+        export http_proxy="$proxy_url"
+        export https_proxy="$proxy_url"
+    else
+        echo "==> 代理 $proxy_url 不可达，跳过"
+    fi
+}
+setup_apt_mirror() {
+    if [ "$OS" != "Linux" ] || ! command -v apt &>/dev/null; then
+        return
+    fi
+    local codename
+    codename=$(lsb_release -cs 2>/dev/null) || return
+    echo "==> 切换 apt 为清华镜像源..."
+    ${SUDO:-} cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
+    ${SUDO:-} tee /etc/apt/sources.list > /dev/null << EOF
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename} main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-updates main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-backports main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ ${codename}-security main restricted universe multiverse
+EOF
+    echo "==> apt 清华源配置完成"
+}
 
 # ============================================================
-# 3. 安装命令行工具
+# 1. 确保基础依赖: curl, git
 # ============================================================
-echo "==> 安装命令行工具..."
+install_base_deps() {
+    local missing=""
+    command -v curl &>/dev/null || missing="$missing curl"
+    command -v git   &>/dev/null || missing="$missing git"
+    command -v unzip &>/dev/null || missing="$missing unzip"
 
-case "$OS" in
-    Darwin)
-        if command -v brew &>/dev/null; then
-            brew install eza trash make yazi 2>/dev/null || true
-        else
-            echo "请先安装 Homebrew: https://brew.sh"
+    if [ -z "$missing" ]; then
+        return
+    fi
+    echo "==> 安装基础依赖:$missing"
+
+    case "$OS" in
+        Darwin)
+            echo "macOS 应自带 curl 和 git，请检查系统"
+            exit 1
+            ;;
+        Linux)
+            if command -v apt &>/dev/null; then
+                ${SUDO:-} apt update -qq
+                ${SUDO:-} apt install -y $missing
+            elif command -v dnf &>/dev/null; then
+                ${SUDO:-} dnf install -y $missing
+            elif command -v pacman &>/dev/null; then
+                ${SUDO:-} pacman -S --noconfirm $missing
+            else
+                echo "请先手动安装:$missing"
+                exit 1
+            fi
+            ;;
+    esac
+    echo "==> 基础依赖安装完成"
+}
+
+# ============================================================
+# 1. 确保 zsh 已安装
+# ============================================================
+install_zsh() {
+    if command -v zsh &>/dev/null; then
+        echo "==> zsh 已安装: $(zsh --version)"
+        return
+    fi
+    echo "==> 安装 zsh..."
+    case "$OS" in
+        Darwin)
+            echo "macOS 应自带 zsh，请升级系统"
+            exit 1
+            ;;
+        Linux)
+            if command -v apt &>/dev/null; then
+                ${SUDO:-} apt update -qq && ${SUDO:-} apt install -y zsh
+            elif command -v dnf &>/dev/null; then
+                ${SUDO:-} dnf install -y zsh
+            elif command -v pacman &>/dev/null; then
+                ${SUDO:-} pacman -S --noconfirm zsh
+            elif command -v apk &>/dev/null; then
+                ${SUDO:-} apk add zsh
+            else
+                echo "未检测到支持的包管理器，请手动安装 zsh"
+                exit 1
+            fi
+            ;;
+    esac
+    echo "==> zsh 安装完成"
+}
+
+# ============================================================
+# 2. 安装 Oh My Zsh
+# ============================================================
+install_ohmyzsh() {
+    if [ -f "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]; then
+        echo "==> Oh My Zsh 已安装"
+        return
+    fi
+    echo "==> 安装 Oh My Zsh..."
+
+    # 先删掉可能残留的空目录
+    rm -rf "$HOME/.oh-my-zsh"
+
+    local installed=false
+    for repo in \
+        "https://mirror.ghproxy.com/https://github.com/ohmyzsh/ohmyzsh.git" \
+        "https://gitee.com/mirrors/oh-my-zsh.git" \
+        "https://github.com/ohmyzsh/ohmyzsh.git"; do
+        echo "  尝试: $repo"
+        if git clone --depth=1 "$repo" "$HOME/.oh-my-zsh" 2>&1; then
+            installed=true
+            break
         fi
-        ;;
-    Linux)
-        if command -v apt &>/dev/null; then
-            sudo apt update -qq
-            sudo apt install -y eza trash-cli yazi 2>/dev/null || true
-        elif command -v dnf &>/dev/null; then
-            sudo dnf install -y eza trash-cli yazi 2>/dev/null || true
-        elif command -v pacman &>/dev/null; then
-            sudo pacman -S --noconfirm eza trash-cli yazi 2>/dev/null || true
-        else
-            echo "未检测到支持的包管理器，请手动安装: eza, trash-cli, yazi"
-        fi
-        ;;
-esac
+        rm -rf "$HOME/.oh-my-zsh"
+        echo "  失败，尝试下一个镜像..."
+    done
+
+    if [ "$installed" = false ]; then
+        echo "Oh My Zsh 安装失败，请手动安装: https://ohmyz.sh"
+        exit 1
+    fi
+    echo "==> Oh My Zsh 安装完成"
+}
 
 # ============================================================
-# 4. 写入 .zshrc
+# 3. 设置 zsh 为默认 Shell
 # ============================================================
-cat > "$HOME/.zshrc" << 'ZSHRC_EOF'
+set_default_shell() {
+    local zsh_path
+    zsh_path="$(command -v zsh)"
+    if [ "$SHELL" != "$zsh_path" ]; then
+        echo "==> 设置 zsh 为默认 shell..."
+        if ! grep -qxF "$zsh_path" /etc/shells 2>/dev/null; then
+            echo "$zsh_path" | ${SUDO:-} tee -a /etc/shells > /dev/null
+        fi
+        chsh -s "$zsh_path"
+    fi
+}
+
+# ============================================================
+# 4. 安装自定义插件
+# ============================================================
+install_plugins() {
+    local custom_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
+    mkdir -p "$custom_dir"
+
+    if [ ! -d "$custom_dir/zsh-autosuggestions" ]; then
+        echo "==> 安装 zsh-autosuggestions..."
+        git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
+        git clone --depth=1 https://mirror.ghproxy.com/https://github.com/zsh-users/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
+        git clone --depth=1 https://gitee.com/mirrors/zsh-autosuggestions "$custom_dir/zsh-autosuggestions" 2>/dev/null || \
+        echo "  zsh-autosuggestions 安装失败，跳过"
+    fi
+
+    if [ ! -d "$custom_dir/zsh-syntax-highlighting" ]; then
+        echo "==> 安装 zsh-syntax-highlighting..."
+        git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
+        git clone --depth=1 https://mirror.ghproxy.com/https://github.com/zsh-users/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
+        git clone --depth=1 https://gitee.com/mirrors/zsh-syntax-highlighting "$custom_dir/zsh-syntax-highlighting" 2>/dev/null || \
+        echo "  zsh-syntax-highlighting 安装失败，跳过"
+    fi
+}
+
+# ============================================================
+# 5. 安装命令行工具
+# ============================================================
+install_tools() {
+    echo "==> 安装命令行工具..."
+    case "$OS" in
+        Darwin)
+            if command -v brew &>/dev/null; then
+                brew install eza trash make yazi 2>/dev/null || true
+            else
+                echo "请先安装 Homebrew: https://brew.sh"
+            fi
+            ;;
+        Linux)
+            if [ -z "$SUDO" ]; then
+                echo "没有 sudo 权限，跳过工具安装"
+                return
+            fi
+
+            local arch
+            arch=$(uname -m)
+            # GitHub release 用的 arch 名字
+            local gh_arch
+            case "$arch" in
+                x86_64)  gh_arch="x86_64-unknown-linux-gnu" ;;
+                aarch64) gh_arch="aarch64-unknown-linux-gnu" ;;
+                *)       echo "  未知架构: $arch，跳过工具安装"; return ;;
+            esac
+
+            # --- eza (从 GitHub Releases 下载二进制) ---
+            if ! command -v eza &>/dev/null; then
+                echo "  -> 安装 eza..."
+                local eza_url="https://github.com/eza-community/eza/releases/latest/download/eza_${gh_arch}.tar.gz"
+                if curl -fsSL --connect-timeout 15 -o /tmp/eza.tar.gz "$eza_url"; then
+                    sudo tar xzf /tmp/eza.tar.gz -C /usr/local/bin && rm -f /tmp/eza.tar.gz
+                    echo "    eza 安装完成"
+                else
+                    echo "    eza 下载失败，跳过"
+                fi
+            fi
+
+            # --- yazi (musl 静态编译 + 依赖) ---
+            if ! command -v yazi &>/dev/null; then
+                echo "  -> 安装 yazi..."
+                # 先装依赖
+                if command -v apt &>/dev/null; then
+                    sudo apt update -qq
+                    sudo apt install -y ffmpeg 7zip jq poppler-utils fd-find ripgrep fzf zoxide imagemagick chafa 2>/dev/null || true
+                fi
+                # 下载并安装 yazi 本体
+                local yazi_arch
+                case "$arch" in
+                    x86_64)  yazi_arch="x86_64-unknown-linux-musl" ;;
+                    aarch64) yazi_arch="aarch64-unknown-linux-musl" ;;
+                    *)       yazi_arch="$gh_arch" ;;
+                esac
+                local yazi_url="https://github.com/sxyazi/yazi/releases/latest/download/yazi-${yazi_arch}.zip"
+                if curl -fsSL --connect-timeout 30 -o "/tmp/yazi.zip" "$yazi_url"; then
+                    cd /tmp
+                    unzip -o yazi.zip
+                    sudo mv yazi-"${yazi_arch}"/yazi /usr/local/bin/
+                    sudo mv yazi-"${yazi_arch}"/ya   /usr/local/bin/
+                    rm -rf yazi.zip yazi-"${yazi_arch}"
+                    cd "$OLDPWD"
+                    echo "    yazi 安装完成"
+                else
+                    echo "    yazi 下载失败，跳过"
+                fi
+            fi
+
+            # --- trash-cli ---
+            if ! command -v trash &>/dev/null; then
+                echo "  -> 安装 trash-cli..."
+                if command -v apt &>/dev/null; then
+                    sudo apt install -y trash-cli 2>/dev/null || true
+                elif command -v dnf &>/dev/null; then
+                    sudo dnf install -y trash-cli 2>/dev/null || true
+                elif command -v pacman &>/dev/null; then
+                    sudo pacman -S --noconfirm trash-cli 2>/dev/null || true
+                fi
+            fi
+            ;;
+    esac
+}
+
+# ============================================================
+# 6. 写入 .zshrc
+# ============================================================
+write_zshrc() {
+    echo "==> 写入 .zshrc..."
+    cat > "$HOME/.zshrc" << 'ZSHRC_EOF'
+# === 终端类型（修复远程连接时输入回显异常） ===
+export TERM=xterm-256color
+
 # === Oh My Zsh ===
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="agnoster"
@@ -145,5 +372,24 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     }
 fi
 ZSHRC_EOF
+}
 
-echo "==> 完成！执行 'exec zsh' 或重新打开终端即可生效。"
+# ============================================================
+# 主流程
+# ============================================================
+setup_proxy
+setup_apt_mirror
+install_base_deps
+install_zsh
+install_ohmyzsh
+set_default_shell
+install_plugins
+install_tools
+write_zshrc
+
+echo ""
+echo "=============================================="
+echo "  全部完成！"
+echo "  执行: exec zsh"
+echo "  或重新打开终端即可生效"
+echo "=============================================="

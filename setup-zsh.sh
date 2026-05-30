@@ -5,10 +5,17 @@ OS="$(uname -s)"
 
 # 开局请求 sudo 权限并缓存，后续不再询问
 SUDO=""
+echo "==> 检查 sudo 权限..."
 if sudo -v 2>/dev/null; then
     SUDO="sudo"
     # 后台持续刷新 sudo 缓存，防止超时
     (while true; do sudo -n true; sleep 60; kill -0 $$ || exit; done) 2>/dev/null &
+else
+    echo "当前用户没有 sudo 权限！请先执行:"
+    echo "  su - <管理员账户>"
+    echo "  sudo usermod -aG sudo $USER"
+    echo "  然后退出重新登录再运行本脚本"
+    exit 1
 fi
 
 # ============================================================

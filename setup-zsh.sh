@@ -337,13 +337,13 @@ install_opencode() {
         Linux)
             local oc_arch
             case "$(uname -m)" in
-                x86_64) oc_arch="linux-x64-musl" ;;
-                aarch64) oc_arch="linux-arm64-musl" ;;
+                x86_64) oc_arch="linux-x64" ;;
+                aarch64) oc_arch="linux-arm64" ;;
                 *)       echo "    未知架构，跳过 opencode"; return ;;
             esac
             local oc_url="https://github.com/anomalyco/opencode/releases/latest/download/opencode-${oc_arch}.tar.gz"
             if curl -fsSL --connect-timeout 30 -o /tmp/opencode.tar.gz "$oc_url"; then
-                sudo tar xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode 2>/dev/null
+                ${SUDO:-} tar xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode 2>/dev/null
                 rm -f /tmp/opencode.tar.gz
                 echo "==> opencode 安装完成"
             else

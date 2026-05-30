@@ -274,7 +274,23 @@ install_tools() {
 }
 
 # ============================================================
-# 6. 写入 .zshrc
+# 6. 安装 opencode（终端 AI 编程助手）
+# ============================================================
+install_opencode() {
+    if command -v opencode &>/dev/null; then
+        echo "==> opencode 已安装"
+        return
+    fi
+    echo "==> 安装 opencode..."
+    if curl -fsSL --connect-timeout 30 https://opencode.ai/install | bash; then
+        echo "==> opencode 安装完成"
+    else
+        echo "    opencode 安装失败，可手动安装: https://opencode.ai/docs/install"
+    fi
+}
+
+# ============================================================
+# 7. 写入 .zshrc
 # ============================================================
 write_zshrc() {
     echo "==> 写入 .zshrc..."
@@ -385,6 +401,7 @@ install_ohmyzsh
 set_default_shell
 install_plugins
 install_tools
+install_opencode
 write_zshrc
 
 echo ""
@@ -392,4 +409,8 @@ echo "=============================================="
 echo "  全部完成！"
 echo "  执行: exec zsh"
 echo "  或重新打开终端即可生效"
+echo ""
+echo "  opencode 使用方法:"
+echo "    cd 你的项目 && opencode"
+echo "    首次使用运行: opencode auth login"
 echo "=============================================="

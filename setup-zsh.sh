@@ -315,11 +315,42 @@ install_opencode() {
         return
     fi
     echo "==> 安装 opencode..."
-    if curl -fsSL --connect-timeout 30 https://opencode.ai/install | bash; then
-        echo "==> opencode 安装完成"
-    else
-        echo "    opencode 安装失败，可手动安装: https://opencode.ai/docs/install"
-    fi
+    case "$OS" in
+        Darwin)
+            local oc_arch
+            case "$(uname -m)" in
+                arm64) oc_arch="darwin-arm64" ;;
+                *)     oc_arch="darwin-x64" ;;
+            esac
+            local oc_url="https://github.com/anomalyco/opencode/releases/latest/download/opencode-${oc_arch}.zip"
+            if curl -fsSL --connect-timeout 30 -o /tmp/opencode.zip "$oc_url"; then
+                cd /tmp
+                unzip -o opencode.zip opencode 2>/dev/null
+                sudo mv opencode /usr/local/bin/ 2>/dev/null || mv opencode /usr/local/bin/
+                rm -f opencode.zip
+                cd "$OLDPWD"
+                echo "==> opencode 安装完成"
+            else
+                echo "    opencode 下载失败，可手动安装: brew install anomalyco/tap/opencode"
+            fi
+            ;;
+        Linux)
+            local oc_arch
+            case "$(uname -m)" in
+                x86_64) oc_arch="linux-x64-musl" ;;
+                aarch64) oc_arch="linux-arm64-musl" ;;
+                *)       echo "    未知架构，跳过 opencode"; return ;;
+            esac
+            local oc_url="https://github.com/anomalyco/opencode/releases/latest/download/opencode-${oc_arch}.tar.gz"
+            if curl -fsSL --connect-timeout 30 -o /tmp/opencode.tar.gz "$oc_url"; then
+                sudo tar xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode 2>/dev/null
+                rm -f /tmp/opencode.tar.gz
+                echo "==> opencode 安装完成"
+            else
+                echo "    opencode 下载失败，可手动安装: https://opencode.ai/docs/install"
+            fi
+            ;;
+    esac
 }
 
 # ============================================================

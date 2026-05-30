@@ -15,7 +15,7 @@ import json
 # ============================================================
 def benchmark_integer():
     a = 0
-    for i in range(10000):
+    for i in range(2000):
         for j in range(100000):
             a += i * j
     return a
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     random.seed(42)
 
     tests = [
-        ("整数运算 (10^9 次)",         benchmark_integer),
+        ("整数运算 (2亿次)",          benchmark_integer),
         ("浮点运算 (10^6 次三角函数)", benchmark_float),
         ("质数筛 (2000万以内)",       benchmark_prime_sieve),
         ("递归斐波那契 (n=38)",       benchmark_fibonacci),

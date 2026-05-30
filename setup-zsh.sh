@@ -359,31 +359,53 @@ install_opencode() {
 write_zshrc() {
     echo "==> 写入 .zshrc..."
 
-    # 遵循 Oh My Zsh 官方策略：备份旧 .zshrc 到 .zshrc.pre-oh-my-zsh
-    local pre="$HOME/.zshrc.pre-oh-my-zsh"
-    if [ -f "$HOME/.zshrc" ] || [ -h "$HOME/.zshrc" ]; then
-        echo "    发现已有 .zshrc，处理备份..."
-        if [ -e "$pre" ]; then
-            local old_pre="${pre}-$(date +%Y-%m-%d_%H-%M-%S)"
-            echo "    .zshrc.pre-oh-my-zsh 已存在，重命名为 ${old_pre}"
-            mv "$pre" "$old_pre"
+    # 收集需要迁移的旧配置内容
+    local migrated=""
+    local old_rc=""
+
+    # 找到旧配置来源：优先 .zshrc，其次 bash 配置
+    for f in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+        if [ -f "$f" ]; then
+            old_rc="$f"
+            break
         fi
-        echo "    备份旧 .zshrc 到 .zshrc.pre-oh-my-zsh"
-        mv "$HOME/.zshrc" "$pre"
-    else
-        # 没有 .zshrc 但可能有 bash 配置，迁移到 .zshrc.pre-oh-my-zsh 作为参考
-        local bash_conf=""
-        for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
-            if [ -f "$f" ]; then
-                bash_conf="$f"
-                break
+    done
+
+    if [ -n "$old_rc" ]; then
+        echo "    发现旧配置: $old_rc，提取可迁移内容..."
+        # 提取 export / alias / source / PATH 等可兼容配置行
+        # 排除：Oh My Zsh 框架内容、bash 专属命令 (shopt/complete/bind)、shebang
+        migrated=$(awk '
+            /^[[:space:]]*#/ { next }                          # 跳过注释行
+            /^[[:space:]]*$/ { next }                           # 跳过空行
+            /oh-my-zsh/i { next }                               # 跳过 OMZ 相关内容
+            /^[[:space:]]*shopt / { next }                      # bash 专属
+            /^[[:space:]]*complete / { next }                   # bash 专属
+            /^[[:space:]]*bind / { next }                       # bash 专属
+            /^[[:space:]]*PROMPT_COMMAND/ { next }              # bash 专属
+            /^[[:space:]]*PS1=/ { next }                        # 让 OMZ 主题接管
+            /^#!\/bin\/bash/ { next }                           # shebang
+            /conda initialize/ { in_conda=1 }
+            in_conda { if (/<<<.*conda/) { in_conda=0; next }; next }
+            { print }
+        ' "$old_rc")
+
+        # 备份旧配置
+        local pre="$HOME/.zshrc.pre-oh-my-zsh"
+        if [ -f "$HOME/.zshrc" ] || [ -h "$HOME/.zshrc" ]; then
+            if [ -e "$pre" ]; then
+                local old_pre="${pre}-$(date +%Y-%m-%d_%H-%M-%S)"
+                echo "    .zshrc.pre-oh-my-zsh 已存在，重命名为 ${old_pre}"
+                mv "$pre" "$old_pre"
             fi
-        done
-        if [ -n "$bash_conf" ]; then
-            echo "    未找到 .zshrc，但发现 $bash_conf"
-            echo "    已将 $(basename "$bash_conf") 复制到 .zshrc.pre-oh-my-zsh 作为参考"
-            cp "$bash_conf" "$pre"
-            BASH_MIGRATED=true
+            echo "    备份旧 .zshrc 到 .zshrc.pre-oh-my-zsh"
+            mv "$HOME/.zshrc" "$pre"
+        fi
+
+        # 保存迁移内容，稍后追加到新 .zshrc
+        if [ -n "$migrated" ]; then
+            MIGRATED_CONTENT="$migrated"
+            MIGRATED_SOURCE="$old_rc"
         fi
     fi
 
@@ -486,6 +508,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 fi
 ZSHRC_EOF
 
+    # 追加迁移的旧配置
+    if [ -n "${MIGRATED_CONTENT:-}" ]; then
+        echo "" >> "$HOME/.zshrc"
+        echo "# === 以下从 ${MIGRATED_SOURCE:-旧配置} 自动迁移 ===" >> "$HOME/.zshrc"
+        echo "# 如有 bash 专属语法报错，请自行删除对应行" >> "$HOME/.zshrc"
+        echo "${MIGRATED_CONTENT}" >> "$HOME/.zshrc"
+        echo "    已迁移 $(echo "$MIGRATED_CONTENT" | wc -l) 行旧配置"
+    fi
 }
 
 # ============================================================
@@ -508,11 +538,6 @@ echo "  全部完成！"
 echo "  执行: exec zsh"
 echo "  或重新打开终端即可生效"
 echo ""
-if [ "${BASH_MIGRATED:-}" = true ]; then
-    echo "  旧 bash 配置已保存在 ~/.zshrc.pre-oh-my-zsh"
-    echo "  请手动将需要的配置（如 PATH、alias 等）复制到 ~/.zshrc"
-    echo ""
-fi
 echo "  opencode 使用方法:"
 echo "    cd 你的项目 && opencode"
 echo "    进入后执行 /connect 连接自己的 AI 模型"

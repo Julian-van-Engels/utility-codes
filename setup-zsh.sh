@@ -342,10 +342,10 @@ install_opencode() {
             ;;
         Linux)
             # 官方推荐: curl -fsSL https://opencode.ai/install | bash
-            # 指定安装到 /usr/local/bin 确保终端直接可用
-            echo "    使用官方安装脚本 (安装到 /usr/local/bin)..."
-            if OPENCODE_INSTALL_DIR=/usr/local/bin \
-                timeout 60 curl -fsSL --connect-timeout 30 https://opencode.ai/install | ${SUDO:-} bash 2>/dev/null; then
+            # 默认安装到 ~/.opencode/bin，脚本会在 .zshrc 自动加 PATH
+            echo "    使用官方安装脚本..."
+            if timeout 60 curl -fsSL --connect-timeout 30 https://opencode.ai/install | bash 2>/dev/null && \
+               [ -x "$HOME/.opencode/bin/opencode" ]; then
                 echo "==> opencode 安装完成"
             else
                 echo "    opencode 安装失败，请手动: https://opencode.ai/docs/install"
@@ -433,6 +433,7 @@ alias lt='eza --tree --level=2 --icons'
 
 # === 通用环境变量 ===
 DEFAULT_USER=$USER
+export PATH="$HOME/.opencode/bin:$PATH"
 
 # === 自定义 Prompt：只显示最后两级目录 ===
 prompt_dir() {

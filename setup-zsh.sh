@@ -308,6 +308,7 @@ install_tools() {
 
 # ============================================================
 # 6. 安装 opencode（终端 AI 编程助手）
+#   严格遵循官方推荐方式: https://opencode.ai/docs/install
 # ============================================================
 install_opencode() {
     if command -v opencode &>/dev/null; then
@@ -317,37 +318,30 @@ install_opencode() {
     echo "==> 安装 opencode..."
     case "$OS" in
         Darwin)
-            local oc_arch
-            case "$(uname -m)" in
-                arm64) oc_arch="darwin-arm64" ;;
-                *)     oc_arch="darwin-x64" ;;
-            esac
-            local oc_url="https://github.com/anomalyco/opencode/releases/latest/download/opencode-${oc_arch}.zip"
-            if curl -fsSL --connect-timeout 30 -o /tmp/opencode.zip "$oc_url"; then
-                cd /tmp
-                unzip -o opencode.zip opencode 2>/dev/null
-                sudo mv opencode /usr/local/bin/ 2>/dev/null || mv opencode /usr/local/bin/
-                rm -f opencode.zip
-                cd "$OLDPWD"
-                echo "==> opencode 安装完成"
-            else
-                echo "    opencode 下载失败，可手动安装: brew install anomalyco/tap/opencode"
+            # 官方推荐: brew install anomalyco/tap/opencode
+            if command -v brew &>/dev/null; then
+                echo "    使用官方 Homebrew 源安装..."
+                if brew install anomalyco/tap/opencode 2>/dev/null; then
+                    echo "==> opencode 安装完成"
+                    return
+                fi
             fi
+            # fallback: 官方一键脚本
+            echo "    尝试官方安装脚本..."
+            OPENCODE_INSTALL_DIR=/usr/local/bin \
+                curl -fsSL --connect-timeout 30 https://opencode.ai/install | bash 2>/dev/null && \
+                echo "==> opencode 安装完成" || \
+                echo "    opencode 安装失败，请手动: brew install anomalyco/tap/opencode"
             ;;
         Linux)
-            local oc_arch
-            case "$(uname -m)" in
-                x86_64) oc_arch="linux-x64" ;;
-                aarch64) oc_arch="linux-arm64" ;;
-                *)       echo "    未知架构，跳过 opencode"; return ;;
-            esac
-            local oc_url="https://github.com/anomalyco/opencode/releases/latest/download/opencode-${oc_arch}.tar.gz"
-            if curl -fsSL --connect-timeout 30 -o /tmp/opencode.tar.gz "$oc_url"; then
-                ${SUDO:-} tar xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode 2>/dev/null
-                rm -f /tmp/opencode.tar.gz
+            # 官方推荐: curl -fsSL https://opencode.ai/install | bash
+            # 指定安装到 /usr/local/bin 确保终端直接可用
+            echo "    使用官方安装脚本 (安装到 /usr/local/bin)..."
+            if OPENCODE_INSTALL_DIR=/usr/local/bin \
+                timeout 60 curl -fsSL --connect-timeout 30 https://opencode.ai/install | ${SUDO:-} bash 2>/dev/null; then
                 echo "==> opencode 安装完成"
             else
-                echo "    opencode 下载失败，可手动安装: https://opencode.ai/docs/install"
+                echo "    opencode 安装失败，请手动: https://opencode.ai/docs/install"
             fi
             ;;
     esac

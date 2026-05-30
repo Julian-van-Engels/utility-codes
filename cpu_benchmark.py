@@ -164,12 +164,29 @@ if __name__ == "__main__":
         results.append((name, elapsed))
         print(f"{elapsed:.3f}s")
 
+    # 计算字符串的终端显示宽度（中日韩字符占 2 列）
+    def display_width(s):
+        w = 0
+        for ch in s:
+            if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                w += 2
+            else:
+                w += 1
+        return w
+
+    def pad_to(s, target_width):
+        dw = display_width(s)
+        return s + ' ' * (target_width - dw) if dw < target_width else s
+
+    # 找最长测试名宽度
+    max_name_w = max(display_width(name) for name, _ in results) + 4
+
     print()
-    print("-" * 55)
+    print("-" * 60)
     for name, elapsed in results:
         pct = (elapsed / total) * 100
         bar = "#" * int(pct / 2)
-        print(f"  {name:32s} {elapsed:7.3f}s  {bar}")
-    print("-" * 55)
+        print(f"  {pad_to(name, max_name_w)} {elapsed:8.3f}s  {bar}")
+    print("-" * 60)
     print(f"  总耗时: {total:.3f}s")
-    print("=" * 55)
+    print("=" * 60)

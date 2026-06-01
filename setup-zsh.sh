@@ -360,57 +360,45 @@ install_opencode() {
 write_zshrc() {
     echo "==> 写入 .zshrc..."
 
-    # 收集需要迁移的旧配置内容
-    local migrated=""
-    local old_rc=""
+    # ── 收集旧配置内容（完整保留，不过滤） ──
+    local old_rc_content=""
+    local old_rc_source=""
 
-    # 找到旧配置来源：优先 .zshrc，其次 bash 配置
-    for f in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
-        if [ -f "$f" ]; then
-            old_rc="$f"
-            break
-        fi
-    done
-
-    if [ -n "$old_rc" ]; then
-        echo "    发现旧配置: $old_rc，提取可迁移内容..."
-        # 提取 export / alias / source / PATH 等可兼容配置行
-        # 排除：Oh My Zsh 框架内容、bash 专属命令 (shopt/complete/bind)、shebang
-        migrated=$(awk '
-            /^[[:space:]]*#/ { next }                          # 跳过注释行
-            /^[[:space:]]*$/ { next }                           # 跳过空行
-            /oh-my-zsh/i { next }                               # 跳过 OMZ 相关内容
-            /^[[:space:]]*shopt / { next }                      # bash 专属
-            /^[[:space:]]*complete / { next }                   # bash 专属
-            /^[[:space:]]*bind / { next }                       # bash 专属
-            /^[[:space:]]*PROMPT_COMMAND/ { next }              # bash 专属
-            /^[[:space:]]*PS1=/ { next }                        # 让 OMZ 主题接管
-            /^#!\/bin\/bash/ { next }                           # shebang
-            /conda initialize/ { in_conda=1 }
-            in_conda { if (/<<<.*conda/) { in_conda=0; next }; next }
-            { print }
-        ' "$old_rc")
-
-        # 备份旧配置
+    if [ -f "$HOME/.zshrc" ] || [ -h "$HOME/.zshrc" ]; then
+        echo "    发现已有 .zshrc，备份并合并..."
+        # 备份
         local pre="$HOME/.zshrc.pre-oh-my-zsh"
-        if [ -f "$HOME/.zshrc" ] || [ -h "$HOME/.zshrc" ]; then
-            if [ -e "$pre" ]; then
-                local old_pre="${pre}-$(date +%Y-%m-%d_%H-%M-%S)"
-                echo "    .zshrc.pre-oh-my-zsh 已存在，重命名为 ${old_pre}"
-                mv "$pre" "$old_pre"
+        if [ -e "$pre" ]; then
+            mv "$pre" "${pre}-$(date +%Y-%m-%d_%H-%M-%S)"
+        fi
+        cp "$HOME/.zshrc" "$pre"
+        old_rc_content=$(cat "$HOME/.zshrc")
+        old_rc_source=".zshrc"
+    else
+        # 查找 bash 配置
+        for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+            if [ -f "$f" ]; then
+                echo "    未找到 .zshrc，从 $f 迁移配置..."
+                old_rc_content=$(cat "$f")
+                old_rc_source="$(basename "$f")"
+                break
             fi
-            echo "    备份旧 .zshrc 到 .zshrc.pre-oh-my-zsh"
-            mv "$HOME/.zshrc" "$pre"
-        fi
-
-        # 保存迁移内容，稍后追加到新 .zshrc
-        if [ -n "$migrated" ]; then
-            MIGRATED_CONTENT="$migrated"
-            MIGRATED_SOURCE="$old_rc"
-        fi
+        done
     fi
 
-    cat > "$HOME/.zshrc" << 'ZSHRC_EOF'
+    # ── 写入新 .zshrc：旧配置在前，新配置追加在后 ──
+    # 先写旧配置
+    if [ -n "$old_rc_content" ]; then
+        echo "# ── 以下从 ${old_rc_source} 迁移的原有配置 ──" > "$HOME/.zshrc"
+        echo "${old_rc_content}" >> "$HOME/.zshrc"
+        echo "" >> "$HOME/.zshrc"
+        echo "# ── 以下为 Oh My Zsh 及新增配置 ──" >> "$HOME/.zshrc"
+        echo "" >> "$HOME/.zshrc"
+        echo "    已合并 $(echo "$old_rc_content" | wc -l) 行旧配置"
+    fi
+
+    # 追加新配置
+    cat >> "$HOME/.zshrc" << 'ZSHRC_EOF'
 # === 终端类型（修复远程连接时输入回显异常） ===
 export TERM=xterm-256color
 
@@ -419,17 +407,6 @@ export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="agnoster"
 plugins=(git z zsh-autosuggestions zsh-syntax-highlighting)
 source $ZSH/oh-my-zsh.sh
-
-# === 通用别名 ===
-alias zshconfig="vim ~/.zshrc"
-if command -v trash-put &>/dev/null; then
-    alias rm="trash-put"
-elif command -v trash &>/dev/null; then
-    alias rm="trash"
-fi
-alias ls='eza --icons --git --group-directories-first'
-alias ll='eza -lh --icons --git --group-directories-first'
-alias lt='eza --tree --level=2 --icons'
 
 # === 通用环境变量 ===
 DEFAULT_USER=$USER
@@ -440,15 +417,31 @@ prompt_dir() {
     prompt_segment blue $CURRENT_FG '%2~'
 }
 
-# === yazi cd hook ===
-function y() {
-    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
-    yazi "$@" --cwd-file="$tmp"
-    if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-        builtin cd -- "$cwd"
-    fi
-    /bin/rm -f -- "$tmp"
-}
+# === 条件别名（仅工具存在时生效，避免覆盖原生命令） ===
+alias zshconfig="vim ~/.zshrc"
+
+if command -v eza &>/dev/null; then
+    alias ls='eza --icons --git --group-directories-first'
+    alias ll='eza -lh --icons --git --group-directories-first'
+    alias lt='eza --tree --level=2 --icons'
+fi
+
+if command -v trash-put &>/dev/null; then
+    alias rm="trash-put"
+elif command -v trash &>/dev/null; then
+    alias rm="trash"
+fi
+
+if command -v yazi &>/dev/null; then
+    function y() {
+        local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+        yazi "$@" --cwd-file="$tmp"
+        if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+            builtin cd -- "$cwd"
+        fi
+        /bin/rm -f -- "$tmp"
+    }
+fi
 
 # ============================================================
 # macOS 专属配置
@@ -456,13 +449,14 @@ function y() {
 if [[ "$(uname -s)" == "Darwin" ]]; then
     export HOMEBREW_NO_AUTO_UPDATE=true
 
-    # GNU make 替代 BSD make
-    alias make="gmake"
+    if command -v gmake &>/dev/null; then
+        alias make="gmake"
+    fi
 
-    # clang-format
-    alias cformat_i="clang-format -i"
+    if command -v clang-format &>/dev/null; then
+        alias cformat_i="clang-format -i"
+    fi
 
-    # cp + 自动清理 ._ AppleDouble 文件
     cp_dot_clean() {
         local args=()
         local sources=()
@@ -509,15 +503,6 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     }
 fi
 ZSHRC_EOF
-
-    # 追加迁移的旧配置
-    if [ -n "${MIGRATED_CONTENT:-}" ]; then
-        echo "" >> "$HOME/.zshrc"
-        echo "# === 以下从 ${MIGRATED_SOURCE:-旧配置} 自动迁移 ===" >> "$HOME/.zshrc"
-        echo "# 如有 bash 专属语法报错，请自行删除对应行" >> "$HOME/.zshrc"
-        echo "${MIGRATED_CONTENT}" >> "$HOME/.zshrc"
-        echo "    已迁移 $(echo "$MIGRATED_CONTENT" | wc -l) 行旧配置"
-    fi
 }
 
 # ============================================================

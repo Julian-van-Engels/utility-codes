@@ -22,20 +22,35 @@ fi
 # 0. Linux: 配置代理（git + curl 国内加速）
 # ============================================================
 setup_proxy() {
-    local proxy_url="http://127.0.0.1:7897"
     if [ "$OS" != "Linux" ]; then
         return
     fi
-    # 先检测代理是否可达
-    if curl -s --connect-timeout 3 --proxy "$proxy_url" https://www.google.com > /dev/null 2>&1; then
-        echo "==> 检测到代理 $proxy_url，配置 git 代理..."
-        git config --global http.proxy "$proxy_url"
-        git config --global https.proxy "$proxy_url"
-        export http_proxy="$proxy_url"
-        export https_proxy="$proxy_url"
-    else
-        echo "==> 代理 $proxy_url 不可达，跳过"
+
+    # ── 在此添加你的代理端口 ── (Clash 默认 7897, V2Ray 默认 10809)
+    local ports="7897 7892 10809 1080 8118"
+    local proxy_url=""
+
+    for port in $ports; do
+        for proto in socks5h socks5 http; do
+            local test_url="${proto}://127.0.0.1:${port}"
+            if curl -s --connect-timeout 2 --max-time 3 -x "$test_url" https://www.baidu.com > /dev/null 2>&1; then
+                proxy_url="$test_url"
+                break 2
+            fi
+        done
+    done
+
+    if [ -z "$proxy_url" ]; then
+        echo "==> 未检测到代理，跳过"
+        echo "    如需加速，请先启动 Clash / V2Ray 等代理工具"
+        echo "    或在脚本开头的 ports 列表中添加你的代理端口"
+        return
     fi
+
+    echo "==> 检测到代理: $proxy_url"
+    # 仅本次会话生效，不污染 git global 配置
+    export http_proxy="$proxy_url"
+    export https_proxy="$proxy_url"
 }
 setup_apt_mirror() {
     if [ "$OS" != "Linux" ] || ! command -v apt &>/dev/null; then

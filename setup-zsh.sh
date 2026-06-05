@@ -56,46 +56,72 @@ setup_apt_mirror() {
     if [ "$OS" != "Linux" ] || ! command -v apt &>/dev/null; then
         return
     fi
+
     local codename
-    codename=$(lsb_release -cs 2>/dev/null) || return
+    codename=$(awk -F= '/VERSION_CODENAME=/ {gsub(/"/,""); print $2}' /etc/os-release 2>/dev/null)
+    [ -z "$codename" ] && codename=$(lsb_release -cs 2>/dev/null)
+    [ -z "$codename" ] && return
+
+    # 检测发行版: Ubuntu / Debian
+    local distro_id
+    distro_id=$(awk -F= '/^ID=/ {gsub(/"/,""); print $2}' /etc/os-release 2>/dev/null)
+
+    local mirror_url security_url components sources_file keyring_path
+    case "$distro_id" in
+        ubuntu)
+            mirror_url="https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+            security_url="http://security.ubuntu.com/ubuntu"
+            components="main restricted universe multiverse"
+            sources_file="ubuntu.sources"
+            keyring_path="/usr/share/keyrings/ubuntu-archive-keyring.gpg"
+            ;;
+        debian)
+            mirror_url="https://mirrors.tuna.tsinghua.edu.cn/debian"
+            security_url="http://security.debian.org/debian-security"
+            components="main contrib non-free non-free-firmware"
+            sources_file="debian.sources"
+            keyring_path="/usr/share/keyrings/debian-archive-keyring.gpg"
+            ;;
+        *)
+            echo "    未识别的发行版: $distro_id，跳过换源"
+            return
+            ;;
+    esac
 
     local version_id
     version_id=$(awk -F= '/VERSION_ID/ {gsub(/"/,""); print $2}' /etc/os-release 2>/dev/null)
     local major_ver=${version_id%%.*}
 
-    local tsinghua="https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
-    local security="http://security.ubuntu.com/ubuntu"
+    # 备份旧格式 sources.list
+    ${SUDO:-} cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
 
-    if [ "$major_ver" -ge 24 ] 2>/dev/null; then
+    if [ "$major_ver" -ge 24 ] 2>/dev/null && [ "$distro_id" = "ubuntu" ]; then
         echo "==> 切换 apt 为清华镜像源 (DEB822 格式)..."
         ${SUDO:-} mkdir -p /etc/apt/sources.list.d
-        # 先备份可能存在的旧格式文件
-        ${SUDO:-} cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
-        ${SUDO:-} cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.bak 2>/dev/null || true
-        ${SUDO:-} tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null << EOF
+        ${SUDO:-} cp /etc/apt/sources.list.d/${sources_file} /etc/apt/sources.list.d/${sources_file}.bak 2>/dev/null || true
+        ${SUDO:-} tee /etc/apt/sources.list.d/${sources_file} > /dev/null << EOF
 Types: deb
-URIs: ${tsinghua}
+URIs: ${mirror_url}
 Suites: ${codename} ${codename}-updates ${codename}-backports
-Components: main restricted universe multiverse
-Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+Components: ${components}
+Signed-By: ${keyring_path}
 
 Types: deb
-URIs: ${security}
+URIs: ${security_url}
 Suites: ${codename}-security
-Components: main restricted universe multiverse
-Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+Components: ${components}
+Signed-By: ${keyring_path}
 EOF
     else
         echo "==> 切换 apt 为清华镜像源..."
-        ${SUDO:-} cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
         ${SUDO:-} tee /etc/apt/sources.list > /dev/null << EOF
-deb ${tsinghua}/ ${codename} main restricted universe multiverse
-deb ${tsinghua}/ ${codename}-updates main restricted universe multiverse
-deb ${tsinghua}/ ${codename}-backports main restricted universe multiverse
-deb ${security}/ ${codename}-security main restricted universe multiverse
+deb ${mirror_url} ${codename} ${components}
+deb ${mirror_url} ${codename}-updates ${components}
+deb ${mirror_url} ${codename}-backports ${components}
+deb ${security_url} ${codename}-security ${components}
 EOF
     fi
-    echo "==> apt 清华源配置完成"
+    echo "==> apt 清华源配置完成 (${distro_id})"
 }
 
 # ============================================================

@@ -401,13 +401,21 @@ install_opencode() {
 write_zshrc() {
     echo "==> 写入 .zshrc..."
 
-    # ── 收集旧配置内容（完整保留，不过滤） ──
+    # ── Oh My Zsh 配置段唯一标识，用于检测是否已写入 ──
+    local omz_marker="# === Oh My Zsh (setup-zsh) ==="
+
+    # ── 如果 .zshrc 已包含 Oh My Zsh 配置，跳过重复写入 ──
+    if [ -f "$HOME/.zshrc" ] && grep -qF "$omz_marker" "$HOME/.zshrc" 2>/dev/null; then
+        echo "    .zshrc 已包含 Oh My Zsh 配置，跳过覆盖"
+        return
+    fi
+
+    # ── 收集旧配置内容并过滤 bash 特有语法 ──
     local old_rc_content=""
     local old_rc_source=""
 
     if [ -f "$HOME/.zshrc" ] || [ -h "$HOME/.zshrc" ]; then
         echo "    发现已有 .zshrc，备份并合并..."
-        # 备份
         local pre="$HOME/.zshrc.pre-oh-my-zsh"
         if [ -e "$pre" ]; then
             mv "$pre" "${pre}-$(date +%Y-%m-%d_%H-%M-%S)"
@@ -416,8 +424,7 @@ write_zshrc() {
         old_rc_content=$(cat "$HOME/.zshrc")
         old_rc_source=".zshrc"
     else
-        # 查找 bash 配置
-        for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+        for f in "$HOME/.bashrc" "$HOME/.bash_profile"; do
             if [ -f "$f" ]; then
                 echo "    未找到 .zshrc，从 $f 迁移配置..."
                 old_rc_content=$(cat "$f")
@@ -427,19 +434,33 @@ write_zshrc() {
         done
     fi
 
+    # ── 过滤掉 bash 特有语法（shopt / bash-completion / bash PS1 等） ──
+    filter_bash_only() {
+        sed -e '/^shopt\b/d' \
+            -e '/\[ -f.*bash-completion\/bash_completion\]/,/^fi$/d' \
+            -e '/\[ -f.*\/etc\/bash_completion\]/,/^fi$/d' \
+            -e '/case \$- in/,/esac/d' \
+            -e '/^\[ "\$color_prompt" = yes/,/^unset color_prompt/d' \
+            -e '/^case "\$TERM" in/,/esac/d' \
+            -e 's/\\\[\\033\[[0-9;]*m//g' \
+            -e 's/\\\[\\e\]0;[^]]*\\a\\\]//g'
+    }
+
     # ── 写入新 .zshrc：旧配置在前，新配置追加在后 ──
-    # 先写旧配置
     if [ -n "$old_rc_content" ]; then
-        echo "# ── 以下从 ${old_rc_source} 迁移的原有配置 ──" > "$HOME/.zshrc"
-        echo "${old_rc_content}" >> "$HOME/.zshrc"
-        echo "" >> "$HOME/.zshrc"
-        echo "# ── 以下为 Oh My Zsh 及新增配置 ──" >> "$HOME/.zshrc"
-        echo "" >> "$HOME/.zshrc"
-        echo "    已合并 $(echo "$old_rc_content" | wc -l) 行旧配置"
+        local filtered
+        filtered=$(echo "$old_rc_content" | filter_bash_only)
+        if [ -n "$filtered" ]; then
+            echo "# ── 以下从 ${old_rc_source} 迁移的原有配置（已过滤 bash 特有语法）───" > "$HOME/.zshrc"
+            echo "$filtered" >> "$HOME/.zshrc"
+            echo "" >> "$HOME/.zshrc"
+            echo "    已合并并过滤旧配置"
+        fi
     fi
 
-    # 追加新配置
+    # ── 追加 Oh My Zsh 及新增配置 ──
     cat >> "$HOME/.zshrc" << 'ZSHRC_EOF'
+# === Oh My Zsh (setup-zsh) ===
 # === 终端类型（修复远程连接时输入回显异常） ===
 export TERM=xterm-256color
 

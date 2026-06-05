@@ -12,3 +12,4 @@ requests/*
 
 # macOS
 *.DS_Store
+._*

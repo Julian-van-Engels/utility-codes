@@ -71,8 +71,8 @@ def generate_report(config):
             if not os.path.exists(repo_path):
                 continue
 
-            commits = get_git_commits(repo_path, 'Julian', date_start, date_end)
-            commits.extend(get_git_commits(repo_path, 'Julian-van-Engels', date_start, date_end))
+            # 按邮箱匹配（名字可能不统一：Julian / julian / liangzhaoyu）
+            commits = get_git_commits(repo_path, 'julian.van.engels@gmail.com', date_start, date_end)
 
             valid_commits = []
             for commit in commits:
